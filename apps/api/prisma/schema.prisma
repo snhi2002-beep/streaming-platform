@@ -1,0 +1,709 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+  DELETED
+}
+
+enum MaturityRating {
+  G
+  PG
+  PG_13
+  R
+  NC_17
+}
+
+enum ContentStatus {
+  DRAFT
+  PUBLISHED
+  UNPUBLISHED
+  ARCHIVED
+}
+
+enum MediaOwnerType {
+  MOVIE
+  EPISODE
+  TRAILER
+}
+
+enum MediaAssetStatus {
+  UPLOADING
+  UPLOADED
+  QUEUED
+  PROCESSING
+  READY
+  FAILED
+  CANCELED
+  DELETED
+}
+
+enum BillingInterval {
+  MONTHLY
+  ANNUAL
+}
+
+enum SubscriptionStatus {
+  INCOMPLETE
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+enum PlaybackSessionStatus {
+  ACTIVE
+  EXPIRED
+  COMPLETED
+  REVOKED
+}
+
+enum CastRoleType {
+  ACTOR
+  DIRECTOR
+  WRITER
+  PRODUCER
+}
+
+model User {
+  id                  String        @id @default(uuid()) @db.Char(36)
+  email               String        @unique @db.VarChar(255)
+  passwordHash        String        @db.VarChar(255)
+  status              AccountStatus @default(PENDING_VERIFICATION)
+  emailVerifiedAt     DateTime?
+  failedLoginAttempts Int           @default(0)
+  lockedUntil         DateTime?
+  mfaEnabled          Boolean       @default(false)
+  mfaSecretEncrypted  String?       @db.VarChar(512)
+  stripeCustomerId    String?       @unique @db.VarChar(128)
+  lastLoginAt         DateTime?
+  deletedAt           DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  userRoles               UserRole[]
+  profiles                Profile[]
+  devices                 Device[]
+  refreshTokens           RefreshToken[]
+  emailVerificationTokens EmailVerificationToken[]
+  passwordResetTokens     PasswordResetToken[]
+  subscriptions           Subscription[]
+  paymentRecords          PaymentRecord[]
+  playbackSessions        PlaybackSession[]
+  auditLogs               AuditLog[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Role {
+  id          String   @id @default(uuid()) @db.Char(36)
+  name        String   @unique @db.VarChar(64)
+  description String?  @db.VarChar(255)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+}
+
+model Permission {
+  id          String   @id @default(uuid()) @db.Char(36)
+  code        String   @unique @db.VarChar(128)
+  description String?  @db.VarChar(255)
+  createdAt   DateTime @default(now())
+
+  rolePermissions RolePermission[]
+}
+
+model UserRole {
+  userId     String   @db.Char(36)
+  roleId     String   @db.Char(36)
+  assignedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+}
+
+model RolePermission {
+  roleId       String @db.Char(36)
+  permissionId String @db.Char(36)
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model Device {
+  id                String   @id @default(uuid()) @db.Char(36)
+  userId            String   @db.Char(36)
+  deviceFingerprint String   @db.VarChar(128)
+  deviceName        String   @db.VarChar(128)
+  deviceType        String   @db.VarChar(64)
+  userAgent         String?  @db.VarChar(512)
+  lastIpAddress     String?  @db.VarChar(64)
+  lastActiveAt      DateTime @default(now())
+  isTrusted         Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokens    RefreshToken[]
+  playbackSessions PlaybackSession[]
+
+  @@unique([userId, deviceFingerprint])
+  @@index([userId, lastActiveAt])
+}
+
+model RefreshToken {
+  id                  String    @id @default(uuid()) @db.Char(36)
+  userId              String    @db.Char(36)
+  deviceId            String?   @db.Char(36)
+  tokenHash           String    @unique @db.Char(64)
+  familyId            String    @db.Char(36)
+  replacedByTokenHash String?   @db.Char(64)
+  isRevoked           Boolean   @default(false)
+  revokedReason       String?   @db.VarChar(128)
+  ipAddress           String?   @db.VarChar(64)
+  userAgent           String?   @db.VarChar(512)
+  expiresAt           DateTime
+  createdAt           DateTime  @default(now())
+  revokedAt           DateTime?
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([userId, isRevoked])
+  @@index([familyId])
+  @@index([expiresAt])
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(uuid()) @db.Char(36)
+  userId    String    @db.Char(36)
+  tokenHash String    @unique @db.Char(64)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Char(36)
+  userId    String    @db.Char(36)
+  tokenHash String    @unique @db.Char(64)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Profile {
+  id                        String         @id @default(uuid()) @db.Char(36)
+  userId                    String         @db.Char(36)
+  name                      String         @db.VarChar(64)
+  avatarUrl                 String?        @db.VarChar(512)
+  isKidsProfile             Boolean        @default(false)
+  maxMaturityRating         MaturityRating @default(NC_17)
+  preferredAudioLanguage    String         @default("en") @db.VarChar(16)
+  preferredSubtitleLanguage String?        @db.VarChar(16)
+  subtitlesEnabled          Boolean        @default(false)
+  autoplayNextEpisode       Boolean        @default(true)
+  pinHash                   String?        @db.VarChar(255)
+  createdAt                 DateTime       @default(now())
+  updatedAt                 DateTime       @updatedAt
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  watchHistory     WatchHistory[]
+  watchlist        Watchlist?
+  reviews          Review[]
+  playbackSessions PlaybackSession[]
+
+  @@index([userId])
+}
+
+model Genre {
+  id          String   @id @default(uuid()) @db.Char(36)
+  name        String   @unique @db.VarChar(64)
+  slug        String   @unique @db.VarChar(64)
+  description String?  @db.VarChar(255)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  movies MovieGenre[]
+  series SeriesGenre[]
+}
+
+model CastMember {
+  id        String   @id @default(uuid()) @db.Char(36)
+  fullName  String   @db.VarChar(128)
+  slug      String   @unique @db.VarChar(128)
+  bio       String?  @db.Text
+  photoUrl  String?  @db.VarChar(512)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  movies MovieCast[]
+  series SeriesCast[]
+
+  @@index([fullName])
+}
+
+model Movie {
+  id              String         @id @default(uuid()) @db.Char(36)
+  title           String         @db.VarChar(255)
+  slug            String         @unique @db.VarChar(255)
+  synopsis        String         @db.Text
+  releaseDate     DateTime?
+  runtimeSeconds  Int            @default(0)
+  maturityRating  MaturityRating @default(PG_13)
+  originalLang    String         @default("en") @db.VarChar(16)
+  posterUrl       String?        @db.VarChar(512)
+  backdropUrl     String?        @db.VarChar(512)
+  status          ContentStatus  @default(DRAFT)
+  isFeatured      Boolean        @default(false)
+  trendingScore   Float          @default(0)
+  averageRating   Decimal        @default(0.00) @db.Decimal(3, 2)
+  reviewCount     Int            @default(0)
+  requiresPremium Boolean        @default(true)
+  publishedAt     DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  genres         MovieGenre[]
+  cast           MovieCast[]
+  mediaAsset     MediaAsset?     @relation("MoviePrimaryMedia")
+  trailerAsset   MediaAsset?     @relation("MovieTrailerMedia")
+  watchHistory   WatchHistory[]
+  watchlistItems WatchlistItem[]
+  reviews        Review[]
+
+  @@index([status, isFeatured])
+  @@index([status, trendingScore(sort: Desc)])
+  @@index([status, releaseDate(sort: Desc)])
+  @@fulltext([title, synopsis])
+}
+
+model MovieGenre {
+  movieId String @db.Char(36)
+  genreId String @db.Char(36)
+
+  movie Movie @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  genre Genre @relation(fields: [genreId], references: [id], onDelete: Cascade)
+
+  @@id([movieId, genreId])
+  @@index([genreId])
+}
+
+model MovieCast {
+  movieId       String       @db.Char(36)
+  castMemberId  String       @db.Char(36)
+  roleType      CastRoleType @default(ACTOR)
+  characterName String?      @db.VarChar(128)
+  billingOrder  Int          @default(0)
+
+  movie      Movie      @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  castMember CastMember @relation(fields: [castMemberId], references: [id], onDelete: Cascade)
+
+  @@id([movieId, castMemberId, roleType])
+  @@index([castMemberId])
+}
+
+model Series {
+  id              String         @id @default(uuid()) @db.Char(36)
+  title           String         @db.VarChar(255)
+  slug            String         @unique @db.VarChar(255)
+  synopsis        String         @db.Text
+  releaseDate     DateTime?
+  maturityRating  MaturityRating @default(PG_13)
+  originalLang    String         @default("en") @db.VarChar(16)
+  posterUrl       String?        @db.VarChar(512)
+  backdropUrl     String?        @db.VarChar(512)
+  status          ContentStatus  @default(DRAFT)
+  isFeatured      Boolean        @default(false)
+  trendingScore   Float          @default(0)
+  averageRating   Decimal        @default(0.00) @db.Decimal(3, 2)
+  reviewCount     Int            @default(0)
+  requiresPremium Boolean        @default(true)
+  publishedAt     DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  genres         SeriesGenre[]
+  cast           SeriesCast[]
+  seasons        Season[]
+  watchlistItems WatchlistItem[]
+  reviews        Review[]
+
+  @@index([status, isFeatured])
+  @@index([status, trendingScore(sort: Desc)])
+  @@fulltext([title, synopsis])
+}
+
+model SeriesGenre {
+  seriesId String @db.Char(36)
+  genreId  String @db.Char(36)
+
+  series Series @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  genre  Genre  @relation(fields: [genreId], references: [id], onDelete: Cascade)
+
+  @@id([seriesId, genreId])
+  @@index([genreId])
+}
+
+model SeriesCast {
+  seriesId      String       @db.Char(36)
+  castMemberId  String       @db.Char(36)
+  roleType      CastRoleType @default(ACTOR)
+  characterName String?      @db.VarChar(128)
+  billingOrder  Int          @default(0)
+
+  series     Series     @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  castMember CastMember @relation(fields: [castMemberId], references: [id], onDelete: Cascade)
+
+  @@id([seriesId, castMemberId, roleType])
+  @@index([castMemberId])
+}
+
+model Season {
+  id           String        @id @default(uuid()) @db.Char(36)
+  seriesId     String        @db.Char(36)
+  seasonNumber Int
+  title        String        @db.VarChar(255)
+  synopsis     String?       @db.Text
+  posterUrl    String?       @db.VarChar(512)
+  releaseDate  DateTime?
+  status       ContentStatus @default(DRAFT)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  series   Series    @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  episodes Episode[]
+
+  @@unique([seriesId, seasonNumber])
+  @@index([seriesId, status])
+}
+
+model Episode {
+  id             String        @id @default(uuid()) @db.Char(36)
+  seasonId       String        @db.Char(36)
+  episodeNumber  Int
+  title          String        @db.VarChar(255)
+  synopsis       String?       @db.Text
+  runtimeSeconds Int           @default(0)
+  stillUrl       String?       @db.VarChar(512)
+  releaseDate    DateTime?
+  status         ContentStatus @default(DRAFT)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  season       Season         @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  mediaAsset   MediaAsset?    @relation("EpisodePrimaryMedia")
+  watchHistory WatchHistory[]
+
+  @@unique([seasonId, episodeNumber])
+  @@index([seasonId, status])
+}
+
+model MediaAsset {
+  id                    String           @id @default(uuid()) @db.Char(36)
+  ownerType             MediaOwnerType
+  movieId               String?          @unique @db.Char(36)
+  movieTrailerId        String?          @unique @db.Char(36)
+  episodeId             String?          @unique @db.Char(36)
+  uploadedByUserId      String           @db.Char(36)
+  status                MediaAssetStatus @default(UPLOADING)
+  originalFileName      String           @db.VarChar(255)
+  originalMimeType      String           @db.VarChar(64)
+  expectedFileSizeBytes BigInt
+  actualFileSizeBytes   BigInt?
+  rawStorageBucket      String           @db.VarChar(128)
+  rawStorageKey         String           @unique @db.VarChar(512)
+  s3MultipartUploadId   String?          @db.VarChar(255)
+  hlsMasterPlaylistKey  String?          @db.VarChar(512)
+  processedBucket       String?          @db.VarChar(128)
+  thumbnailsVttKey      String?          @db.VarChar(512)
+  posterThumbnailKey    String?          @db.VarChar(512)
+  sourceWidth           Int?
+  sourceHeight          Int?
+  durationSeconds       Float?
+  videoCodec            String?          @db.VarChar(64)
+  audioCodec            String?          @db.VarChar(64)
+  drmEnabled            Boolean          @default(false)
+  drmKeyId              String?          @db.VarChar(128)
+  processingProgress    Int              @default(0)
+  processingJobId       String?          @db.VarChar(128)
+  errorMessage          String?          @db.Text
+  uploadCompletedAt     DateTime?
+  processingStartedAt   DateTime?
+  processingCompletedAt DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  movie            Movie?            @relation("MoviePrimaryMedia", fields: [movieId], references: [id], onDelete: SetNull)
+  movieTrailer     Movie?            @relation("MovieTrailerMedia", fields: [movieTrailerId], references: [id], onDelete: SetNull)
+  episode          Episode?          @relation("EpisodePrimaryMedia", fields: [episodeId], references: [id], onDelete: SetNull)
+  renditions       VideoRendition[]
+  subtitleTracks   SubtitleTrack[]
+  playbackSessions PlaybackSession[]
+
+  @@index([status, createdAt])
+  @@index([uploadedByUserId])
+}
+
+model VideoRendition {
+  id               String   @id @default(uuid()) @db.Char(36)
+  mediaAssetId     String   @db.Char(36)
+  name             String   @db.VarChar(32)
+  width            Int
+  height           Int
+  videoBitrateKbps Int
+  audioBitrateKbps Int
+  codecs           String   @db.VarChar(128)
+  playlistKey      String   @db.VarChar(512)
+  segmentCount     Int      @default(0)
+  totalSizeBytes   BigInt   @default(0)
+  createdAt        DateTime @default(now())
+
+  mediaAsset MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([mediaAssetId, name])
+  @@index([mediaAssetId])
+}
+
+model SubtitleTrack {
+  id            String   @id @default(uuid()) @db.Char(36)
+  mediaAssetId  String   @db.Char(36)
+  languageCode  String   @db.VarChar(16)
+  label         String   @db.VarChar(64)
+  isForced      Boolean  @default(false)
+  isSdh         Boolean  @default(false)
+  vttStorageKey String   @db.VarChar(512)
+  createdAt     DateTime @default(now())
+
+  mediaAsset MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([mediaAssetId, languageCode, isForced])
+  @@index([mediaAssetId])
+}
+
+model WatchHistory {
+  id              String    @id @default(uuid()) @db.Char(36)
+  profileId       String    @db.Char(36)
+  movieId         String?   @db.Char(36)
+  episodeId       String?   @db.Char(36)
+  progressSeconds Int       @default(0)
+  durationSeconds Int       @default(1)
+  completed       Boolean   @default(false)
+  completedAt     DateTime?
+  lastWatchedAt   DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  profile Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  movie   Movie?   @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  episode Episode? @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, movieId])
+  @@unique([profileId, episodeId])
+  @@index([profileId, lastWatchedAt(sort: Desc)])
+  @@index([profileId, completed])
+}
+
+model Watchlist {
+  id        String   @id @default(uuid()) @db.Char(36)
+  profileId String   @unique @db.Char(36)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  profile Profile         @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  items   WatchlistItem[]
+}
+
+model WatchlistItem {
+  id          String   @id @default(uuid()) @db.Char(36)
+  watchlistId String   @db.Char(36)
+  movieId     String?  @db.Char(36)
+  seriesId    String?  @db.Char(36)
+  addedAt     DateTime @default(now())
+
+  watchlist Watchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+  movie     Movie?    @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  series    Series?   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  @@unique([watchlistId, movieId])
+  @@unique([watchlistId, seriesId])
+  @@index([watchlistId, addedAt(sort: Desc)])
+}
+
+model PlaybackSession {
+  id               String                @id @default(uuid()) @db.Char(36)
+  userId           String                @db.Char(36)
+  profileId        String                @db.Char(36)
+  deviceId         String?               @db.Char(36)
+  mediaAssetId     String                @db.Char(36)
+  sessionTokenHash String                @unique @db.Char(64)
+  status           PlaybackSessionStatus @default(ACTIVE)
+  ipAddress        String?               @db.VarChar(64)
+  userAgent        String?               @db.VarChar(512)
+  lastPositionSec  Int                   @default(0)
+  lastHeartbeatAt  DateTime              @default(now())
+  expiresAt        DateTime
+  createdAt        DateTime              @default(now())
+  endedAt          DateTime?
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile    Profile    @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  device     Device?    @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  mediaAsset MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, lastHeartbeatAt])
+  @@index([expiresAt])
+}
+
+model SubscriptionPlan {
+  id                   String          @id @default(uuid()) @db.Char(36)
+  code                 String          @unique @db.VarChar(64)
+  name                 String          @db.VarChar(128)
+  description          String?         @db.Text
+  priceAmount          Decimal         @db.Decimal(10, 2)
+  currency             String          @default("USD") @db.Char(3)
+  billingInterval      BillingInterval
+  trialDays            Int             @default(0)
+  maxConcurrentStreams Int             @default(2)
+  maxResolutionHeight  Int             @default(1080)
+  stripePriceId        String?         @unique @db.VarChar(128)
+  isActive             Boolean         @default(true)
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  subscriptions Subscription[]
+
+  @@index([isActive])
+}
+
+model Subscription {
+  id                   String             @id @default(uuid()) @db.Char(36)
+  userId               String             @db.Char(36)
+  planId               String             @db.Char(36)
+  status               SubscriptionStatus @default(INCOMPLETE)
+  stripeSubscriptionId String?            @unique @db.VarChar(128)
+  currentPeriodStart   DateTime
+  currentPeriodEnd     DateTime
+  cancelAtPeriodEnd    Boolean            @default(false)
+  canceledAt           DateTime?
+  trialEndsAt          DateTime?
+  gracePeriodEndsAt    DateTime?
+  providerUpdatedAt    DateTime           @default(now())
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan           SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  paymentRecords PaymentRecord[]
+
+  @@index([userId, status])
+  @@index([currentPeriodEnd])
+}
+
+model PaymentRecord {
+  id                    String        @id @default(uuid()) @db.Char(36)
+  userId                String        @db.Char(36)
+  subscriptionId        String?       @db.Char(36)
+  stripeInvoiceId       String?       @unique @db.VarChar(128)
+  stripePaymentIntentId String?       @unique @db.VarChar(128)
+  amount                Decimal       @db.Decimal(10, 2)
+  currency              String        @default("USD") @db.Char(3)
+  status                PaymentStatus
+  failureReason         String?       @db.VarChar(255)
+  paidAt                DateTime?
+  createdAt             DateTime      @default(now())
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model WebhookEvent {
+  id              String    @id @default(uuid()) @db.Char(36)
+  provider        String    @default("STRIPE") @db.VarChar(32)
+  providerEventId String    @unique @db.VarChar(128)
+  eventType       String    @db.VarChar(128)
+  payloadJson     Json
+  processed       Boolean   @default(false)
+  processingError String?   @db.Text
+  processedAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([provider, eventType])
+  @@index([processed, createdAt])
+}
+
+model Review {
+  id        String   @id @default(uuid()) @db.Char(36)
+  profileId String   @db.Char(36)
+  movieId   String?  @db.Char(36)
+  seriesId  String?  @db.Char(36)
+  rating    Int
+  comment   String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  movie   Movie?  @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  series  Series? @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, movieId])
+  @@unique([profileId, seriesId])
+  @@index([movieId, createdAt(sort: Desc)])
+  @@index([seriesId, createdAt(sort: Desc)])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Char(36)
+  actorUserId String?  @db.Char(36)
+  action      String   @db.VarChar(128)
+  entityType  String   @db.VarChar(64)
+  entityId    String   @db.VarChar(64)
+  metadata    Json?
+  ipAddress   String?  @db.VarChar(64)
+  userAgent   String?  @db.VarChar(512)
+  createdAt   DateTime @default(now())
+
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId, createdAt(sort: Desc)])
+  @@index([entityType, entityId])
+  @@index([action, createdAt(sort: Desc)])
+}
