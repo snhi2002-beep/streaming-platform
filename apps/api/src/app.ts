@@ -11,9 +11,11 @@ import {
   centralizedErrorMiddleware,
 } from "./middleware/error.middleware.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
+import { profilesRouter } from "./modules/profiles/profiles.routes.js";
 import { catalogRouter } from "./modules/catalog/catalog.routes.js";
 import { videosRouter } from "./modules/videos/videos.routes.js";
 import { playbackRouter } from "./modules/playback/playback.routes.js";
+import { reviewsRouter } from "./modules/reviews/reviews.routes.js";
 import {
   subscriptionsRouter,
   stripeWebhookHandler,
@@ -55,7 +57,6 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 app.use(cookieParser(env.COOKIE_SECRET));
 
-// Latency telemetry middleware
 app.use((req, res, next) => {
   const start = performance.now();
   res.on("finish", () => {
@@ -67,7 +68,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// OpenAPI 3.1 Specification
 const openApiSpec = {
   openapi: "3.1.0",
   info: {
@@ -81,20 +81,24 @@ const openApiSpec = {
     "/auth/register": { post: { summary: "Register new account & default profile" } },
     "/auth/login": { post: { summary: "Authenticate & issue short-lived JWT + HttpOnly refresh cookie" } },
     "/auth/refresh": { post: { summary: "Rotate refresh token with family reuse detection" } },
+    "/profiles": { get: { summary: "List account viewing profiles" }, post: { summary: "Create viewing profile" } },
+    "/profiles/{profileId}/watchlist": { get: { summary: "Get profile watchlist" }, post: { summary: "Add to watchlist" } },
+    "/profiles/{profileId}/continue-watching": { get: { summary: "Get resume playback list" } },
     "/catalog/home": { get: { summary: "Fetch cached homepage featured & trending catalog" } },
     "/catalog/movies": { get: { summary: "Search, filter, and paginate published movies" } },
     "/videos/uploads/initiate": { post: { summary: "Admin: Request presigned S3 upload session" } },
     "/videos/uploads/{assetId}/complete": { post: { summary: "Admin: Verify S3 upload & enqueue BullMQ FFmpeg HLS job" } },
     "/playback/sessions": { post: { summary: "Authorize HLS playback, verify entitlement & concurrent stream limit" } },
+    "/playback/sessions/{sessionId}/heartbeat": { post: { summary: "Update playback heartbeat & watch-history progress" } },
     "/subscriptions/checkout": { post: { summary: "Create Stripe subscription checkout session" } },
     "/payments/webhook": { post: { summary: "Verified raw-body Stripe webhook processor" } },
+    "/reviews": { post: { summary: "Submit movie or series rating and review" } },
   },
 };
 
 app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(openApiSpec));
 app.use("/health", healthRouter);
 
-// Backward-compatible route for starter Next.js frontend
 app.get("/api/streams", (_req, res) => {
   res.json({
     streams: [
@@ -109,12 +113,13 @@ app.get("/api/streams", (_req, res) => {
   });
 });
 
-// Versioned REST API v1 routes
 app.use(`${API_PREFIX}/auth`, authRouter);
+app.use(`${API_PREFIX}/profiles`, profilesRouter);
 app.use(`${API_PREFIX}/catalog`, catalogRouter);
 app.use(`${API_PREFIX}/videos`, videosRouter);
 app.use(`${API_PREFIX}/playback`, playbackRouter);
 app.use(`${API_PREFIX}/subscriptions`, subscriptionsRouter);
+app.use(`${API_PREFIX}/reviews`, reviewsRouter);
 
 app.use((_req, _res, next) => {
   next(AppError.notFound("API endpoint not found"));
