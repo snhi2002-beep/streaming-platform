@@ -1,0 +1,92 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: vod-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_local_pass_change_me
+      MYSQL_DATABASE: vod_platform
+      MYSQL_USER: vod_user
+      MYSQL_PASSWORD: vod_local_pass_change_me
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: vod-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "redis_local_pass_change_me"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis_local_pass_change_me", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: vod-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin_change_me
+      MINIO_ROOT_PASSWORD: minioadmin_change_me
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: vod-api
+    restart: unless-stopped
+    env_file:
+      - ./apps/api/.env.example
+    environment:
+      DATABASE_URL: "mysql://vod_user:vod_local_pass_change_me@mysql:3306/vod_platform?connection_limit=20"
+      REDIS_HOST: redis
+      S3_ENDPOINT: http://minio:9000
+    ports:
+      - "4000:4000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile.worker
+    container_name: vod-worker
+    restart: unless-stopped
+    env_file:
+      - ./apps/api/.env.example
+    environment:
+      DATABASE_URL: "mysql://vod_user:vod_local_pass_change_me@mysql:3306/vod_platform?connection_limit=10"
+      REDIS_HOST: redis
+      S3_ENDPOINT: http://minio:9000
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  mysql_data:
+  redis_data:
+  minio_data:
